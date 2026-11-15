@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.env
+.env.*
+*.skellkey
+*.key
+*.pem
+*.p12
+private/
+secrets/
+.skellcipher/
+.skellcipher-work/
+*.plaintext.tmp
