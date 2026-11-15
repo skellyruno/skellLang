@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skelllang"
+version = "0.1.0"
+description = "Experimental Skelly declarative audio-plugin language"
+requires-python = ">=3.10"
+authors = [{name = "Skelly"}]
+
+[project.scripts]
+skelllang = "skelllang.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["skelllang*"]

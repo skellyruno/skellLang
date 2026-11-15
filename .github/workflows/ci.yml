@@ -1,0 +1,35 @@
+name: SkellLang CI
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: skelllang-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  python:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile and test
+        run: |
+          python -m compileall -q skelllang tests
+          python -m unittest discover -s tests -v
+          python -m skelllang check examples/SkellWarmth.skell
+      - name: Checkout pinned SkellForge original
+        uses: actions/checkout@v5
+        with:
+          repository: skellyruno/skellforge
+          ref: 33ccce7ff7cfff48695fe13e5c05b652a4a7e744
+          path: origin/skellforge
+      - name: Check output parity with original parser
+        run: python tests/check_forge_parity.py origin/skellforge
