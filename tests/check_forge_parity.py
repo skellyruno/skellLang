@@ -2,6 +2,7 @@
 import json
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from skelllang import compile_source, format_source
 from skelllang.compat.automation import sync_registry
 
