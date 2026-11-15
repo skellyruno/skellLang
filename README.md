@@ -1,36 +1,37 @@
 # SkellLang 🩻
 
-Skelly's experimental proprietary audio-plugin language, extracted from the original SkellForge v0.1 compiler.
+Skelly's experimental proprietary audio-plugin language, extracted from the existing SkellForge v0.1 compiler.
 
-**Status:** backwards-compatible standalone compiler, plus experimental SkellCipher 0.1 authenticated encryption. The compiler still targets validated SkellForge Studio JSON, not a direct native VST3 backend. The original SkellForge repo and shipped plugins remain unchanged.
+**Current status:** standalone 0.1-compatible compiler, experimental SkellCipher AES-256-GCM encrypted source, and optional scrypt-protected offline key backup/recovery. The compiler still targets SkellForge Studio JSON (not SkellNative VST3). Original SkellForge and existing plugin projects are unchanged.
 
-## Plaintext language compiler (Python 3.10+)
+## Plaintext compiler
 
     python -m skelllang check examples/SkellWarmth.skell
     python -m skelllang export examples/SkellWarmth.skell scene.json
     python -m unittest discover -s tests -v
 
-The extracted compatibility layer preserves SkellLang 0.1 syntax, retired automation IDs, stable Studio JSON and deterministic formatting.
+Preserves SkellLang 0.1 syntax, Studio JSON format, retired automation IDs and deterministic code generation.
 
-## SkellCipher encryption (experimental)
-
-On Windows, install:
+## SkellCipher encrypted source: experimental Windows CLI
 
     python -m pip install ".[windows]"
-
-Use only replaceable development data because key recovery is not implemented:
-
-    python -m skelllang cipher-key-create test-v1 --i-understand-no-recovery
-    python -m skelllang cipher-encrypt examples/SkellWarmth.skell example.skellenc --key-id test-v1
-    python -m skelllang cipher-check example.skellenc
-    python -m skelllang cipher-key-create test-v2 --i-understand-no-recovery
-    python -m skelllang cipher-rotate example.skellenc rotated.skellenc --new-key-id test-v2
+    python -m skelllang cipher-key-create dev-v1 --i-understand-recovery-required
+    python -m skelllang cipher-backup dev-v1 D:/offline/dev-v1.skellbackup
+    python -m skelllang cipher-encrypt examples/SkellWarmth.skell encrypted.skellenc --key-id dev-v1
+    python -m skelllang cipher-check encrypted.skellenc
+    python -m skelllang cipher-key-create dev-v2 --i-understand-recovery-required
+    python -m skelllang cipher-backup dev-v2 D:/offline/dev-v2.skellbackup
+    python -m skelllang cipher-rotate encrypted.skellenc rotated.skellenc --new-key-id dev-v2
     python -m skelllang cipher-check rotated.skellenc
 
-The Windows CLI requires Windows Credential Manager and rejects unsafe keyring backends. It never accepts keys as command arguments. The cipher API is also usable programmatically with explicit in-memory keys, without Windows, after installing the cipher extra.
+The backup command prompts interactively twice for a recovery passphrase. Choose a truly random, high-entropy passphrase using a trusted offline password manager; do not supply it to ChatGPT, an AI agent, environment variables, scripts or process arguments. Store the encrypted backup on separate offline media and the passphrase independently. Before deleting any master key, test backup recovery. If migrating to another Windows account/device, use:
 
-**IMPORTANT:** No independent key backup or recovery has been implemented. Losing the Windows account/vault may permanently destroy access. Do not encrypt irreplaceable Skelly source with this experimental version. Rotation exists but recovery does not. The original unencrypted input is not automatically deleted, and encrypted files are not silently compiled by the ordinary plaintext compiler.
+    python -m skelllang cipher-restore D:/offline/dev-v1.skellbackup
 
-**PUBLIC REPOSITORY:** Do not commit private plaintext SkellLang projects, master keys or generated unprotected assets. Compiled binaries and output models still expose information about DSP and UI.
+Restoring refuses to overwrite an existing key ID in the current Windows Credential Manager vault. Source encryption never deletes the original plaintext .skell input. Ordinary skelllang check does not decrypt .skellenc; only the explicit authorized encrypted entrypoints do.
 
-SkellCipher Crypto is distinct from SkellForge's historic artistic SkellCipher alphabet. See docs/SKELLCIPHER.md, docs/THREAT_MODEL.md and docs/ARCHITECTURE.md.
+**Still experimental:** code and CI tests do not replace an external cryptographic/security review or real migration on the target Windows PC. The Windows vault may be compromised by malware running as the authorized user; compiled binaries and source-derived Studio JSON remain potentially inspectable. Until end-to-end recovery is reviewed, protect only replaceable development sources, not irreplaceable production IP.
+
+**PUBLIC REPOSITORY:** never commit secret plaintext sources, private keys, recovery passwords, or recovery backup files. Only code and synthetic test data belong here.
+
+SkellCipher Crypto is separate from SkellForge's historic artistic SkellCipher alphabet. See docs/SKELLCIPHER.md, docs/THREAT_MODEL.md and docs/ARCHITECTURE.md.

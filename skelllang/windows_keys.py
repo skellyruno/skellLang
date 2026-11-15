@@ -50,8 +50,7 @@ class WindowsCredentialVault:
     def create(self, key_id: str) -> None:
         """Create an OS-vault key with no printing or implicit export.
 
-        Recovery backup is not implemented; protect only replaceable test
-        material until an independent recovery workflow has been verified.
+        Immediately create and verify an offline recovery backup before use.
         """
         _key_id(key_id)
         try:
@@ -66,3 +65,19 @@ class WindowsCredentialVault:
             raise
         except Exception:
             raise KeyStoreError("Windows Credential Manager key creation failed") from None
+
+    def import_key(self, key_id: str, master_key: bytes) -> None:
+        """Restore an authenticated offline backup to a previously unused ID."""
+        _key_id(key_id)
+        _key(master_key)
+        try:
+            if self._backend.get_password(SERVICE, key_id) is not None:
+                raise KeyStoreError("Key identifier already exists")
+            self._backend.set_password(SERVICE, key_id,
+                                       base64.b64encode(master_key).decode("ascii"))
+            if not hmac.compare_digest(self.resolve(key_id), master_key):
+                raise KeyStoreError("Restored key verification failed")
+        except KeyStoreError:
+            raise
+        except Exception:
+            raise KeyStoreError("Windows Credential Manager restore failed") from None

@@ -14,7 +14,7 @@ def main() -> int:
         name = parts[-1]
         if (name.startswith(".env")
                 or name.endswith((".pem", ".p12", ".skellkey",
-                                  ".plaintext.tmp", ".key"))
+                                  ".plaintext.tmp", ".key", ".skellbackup"))
                 or (name.endswith(".skell") and
                     any(p in ("private", "secrets", "protected") for p in parts))):
             print("ERROR: tracked private source/key path forbidden", file=sys.stderr)

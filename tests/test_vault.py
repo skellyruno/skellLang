@@ -43,6 +43,12 @@ class VaultTests(unittest.TestCase):
             self.assertEqual(base64.b64decode(backend.entries[(SERVICE, "test-001")]), secret)
             with self.assertRaisesRegex(KeyStoreError, "already exists"):
                 vault.create("test-001")
+            vault.import_key("restored-key", secret)
+            self.assertEqual(vault.resolve("restored-key"), secret)
+            with self.assertRaisesRegex(KeyStoreError, "already exists"):
+                vault.import_key("restored-key", secret)
+            with self.assertRaises(KeyStoreError):
+                vault.import_key("short-key", b"short")
             with self.assertRaises(KeyStoreError):
                 vault.resolve("unknown")
             backend.entries[(SERVICE, "bad-key")] = "not base64!"

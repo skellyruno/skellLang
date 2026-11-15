@@ -5,6 +5,17 @@ import sys
 from pathlib import Path
 from . import SkellLangError, compile_file, export_json, export_from_studio
 
+def _prompt_recovery(confirm: bool) -> str:
+    """Read recovery secret only from a real terminal, never args or stdin pipes."""
+    if not sys.stdin.isatty() or not sys.stderr.isatty():
+        raise ValueError("Recovery requires a private interactive terminal")
+    from getpass import getpass
+    value = getpass("Offline recovery passphrase: ")
+    if confirm and value != getpass("Confirm recovery passphrase: "):
+        raise ValueError("Recovery confirmation does not match")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="skelllang")
     subs = parser.add_subparsers(dest="action", required=True)
@@ -18,7 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     reverse.add_argument("destination", type=Path)
     create = subs.add_parser("cipher-key-create", help="EXPERIMENTAL Windows vault key")
     create.add_argument("key_id")
-    create.add_argument("--i-understand-no-recovery", action="store_true")
+    create.add_argument("--i-understand-no-recovery", "--i-understand-recovery-required",
+                        dest="i_understand_no_recovery", action="store_true")
     encrypt = subs.add_parser("cipher-encrypt", help="Encrypt validated source")
     encrypt.add_argument("source", type=Path)
     encrypt.add_argument("destination", type=Path)
@@ -29,6 +41,11 @@ def main(argv: list[str] | None = None) -> int:
     rotate.add_argument("source", type=Path)
     rotate.add_argument("destination", type=Path)
     rotate.add_argument("--new-key-id", required=True)
+    backup = subs.add_parser("cipher-backup", help="Export authenticated offline recovery backup")
+    backup.add_argument("key_id")
+    backup.add_argument("destination", type=Path)
+    restore = subs.add_parser("cipher-restore", help="Import an offline recovery backup")
+    restore.add_argument("source", type=Path)
     args = parser.parse_args(argv)
     try:
         if args.action == "check":
@@ -46,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.action == "cipher-key-create" and not args.i_understand_no_recovery:
                 raise CipherError(
                     "Key creation blocked without --i-understand-no-recovery; "
-                    "no safe independent recovery exists")
+                    "create and verify offline backup before using irreplaceable sources")
             vault = WindowsCredentialVault()
             if args.action == "cipher-key-create":
                 vault.create(args.key_id)
@@ -58,6 +75,17 @@ def main(argv: list[str] | None = None) -> int:
             elif args.action == "cipher-check":
                 compile_encrypted_file(args.source, vault.resolve)
                 print("SkellCipher: authorized in-memory compilation passed")
+            elif args.action == "cipher-backup":
+                from .recovery import backup_to_file
+                backup_to_file(args.destination, args.key_id, vault.resolve(args.key_id),
+                               _prompt_recovery(confirm=True))
+                print("SkellCipher: offline encrypted recovery backup created and verified")
+            elif args.action == "cipher-restore":
+                from .recovery import restore_from_file
+                recovered_id, recovered_key = restore_from_file(
+                    args.source, _prompt_recovery(confirm=False))
+                vault.import_key(recovered_id, recovered_key)
+                print("SkellCipher: authenticated key restored into Windows vault")
             elif args.action == "cipher-rotate":
                 rotate_file(args.source, args.destination, vault.resolve,
                             args.new_key_id, vault.resolve(args.new_key_id))

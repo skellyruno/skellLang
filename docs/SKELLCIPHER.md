@@ -1,34 +1,31 @@
-# SkellCipher Crypto v0.1: authenticated source encryption
+# SkellCipher Crypto: encrypted source + offline recovery
 
-Status: experimental cryptographic implementation, not a reviewed production secret-management system.
+Status: experimental cryptography built on the maintained cryptography Python library. Not independently security-audited or certified for production IP.
 
-## Versioned file format
+## Authenticated source format v1
 
-Binary layout: 9-byte magic SKELLENC + NUL, 2-byte unsigned big-endian header length, canonical UTF-8 JSON header, and AES-GCM ciphertext plus a 16-byte authentication tag. Max source length is 32768 bytes; max header is 512 bytes.
+Source format: 9-byte SKELLENC + NUL magic, 2-byte big-endian header length, canonical JSON header, and AES-256-GCM ciphertext with 16-byte tag.
 
-Required fields: v=1, alg="AES-256-GCM+HKDF-SHA256", kid (key ID), nonce (12 random bytes represented as lowercase hex), salt (32 random bytes as lowercase hex), and ctype="skell-source-utf8".
+Required header: v=1, alg="AES-256-GCM+HKDF-SHA256", kid, nonce (12 random bytes, lowercase hex), salt (32 random bytes, lowercase hex), ctype="skell-source-utf8". Magic, length and complete header are authenticated as additional data. Max source is 32768 bytes and max header 512 bytes.
 
-All fields, magic and header length are authenticated as AES-GCM associated data. An unverified key ID is used only to find the candidate master key; it is not itself proof of authorization.
+A fresh random 256-bit salt derives a per-file encryption key using HKDF-SHA256 from the stored 256-bit master; a fresh 96-bit nonce is also sampled. Unique random salts/nonces are overwhelmingly likely but not mathematically guaranteed. Wrong keys, modified headers, missing metadata, bad versions, malformed UTF-8, ciphertext corruption and unauthorized resolvers fail closed. Re-keying generates new salt and nonce and preserves previous encrypted source.
 
-For each encryption, generate a new 256-bit salt and a 96-bit nonce from the OS CSPRNG. Derive a 256-bit per-file encryption key using HKDF-SHA256 with master key, random salt and context "SkellCipher/source/v1/aes-256-gcm". AES-256-GCM from the maintained cryptography library encrypts the source. Random salt and nonce collisions are extremely unlikely but are probabilistic, not a mathematically guaranteed impossibility.
+## Password-protected offline recovery backup v1
 
-The parser rejects noncanonical headers, unknown or missing fields, unsupported versions, tampering, truncated files, wrong keys and oversized inputs. It never falls back to plaintext. Re-keying decrypts inside memory and encrypts into a new file with a different key ID, salt and nonce. Old encrypted files remain unchanged.
+Backup format: 9-byte SKELLREC + NUL magic; two-byte length, canonical authenticated JSON header, then AES-256-GCM encrypted 32-byte master key. Required header includes v=1, kind, kid, kdf="scrypt", n=131072, r=8, p=1, random 32-byte salt and random 12-byte nonce. Parameters are fixed and validated before deriving any key to block resource-exhaustion metadata. The recovery key is derived from a user-entered high-entropy passphrase using scrypt (128 MiB work factor). This backup is not the same key as the source encryption root key.
 
-## Windows keys
+Use an offline random recovery secret generated in a trusted password manager; human-created 20-character passwords are not necessarily secure. CLI prompts through getpass twice for backup and once for restore, and refuses noninteractive or piped passphrase input. Recovery backups are written only to new .skellbackup files, mode 0600 on POSIX (Windows inherits the parent ACL). Backup bytes are authenticated and self-tested before reporting success. Recovery verifies header, password, tag, expected length and then imports the master key into Windows Credential Manager without overwriting any existing key identifier.
 
-Only Windows Credential Manager using keyring WinVaultKeyring (pywin32) may persist keys. No plaintext keyrings or other providers are accepted. Key creation samples 32 random bytes from the OS, checks for collision with existing key IDs, and verifies that the credential can be retrieved. The CLI never accepts or prints secret key strings.
+**Operational recovery check:** Back up each root key separately, keep copies of each .skellbackup offline, store each passphrase separately and securely, test restoration on a spare Windows profile/device, and never delete older keys or plaintext source until every protected file opens under the new key. Do not commit .skellbackup to GitHub or upload it to this chat.
 
-**Recovery and cross-machine import are not implemented.** Use experimental keys only on replaceable source, with the explicit no-recovery acknowledgment. Production protection requires audited offline backup and restore with tested loss/recovery behavior before enabling use on irreplaceable projects. Do not delete older vault keys until all rotated files and archived copies have been checked.
+## Key storage and source compilation
 
-## Build and exposure boundaries
+Windows root keys reside only in approved WinVaultKeyring-backed Windows Credential Manager. No fallback to plaintext keyrings, raw key CLI arguments or environment variables. The standalone cipher library accepts explicit in-memory test/authorized keys cross-platform.
 
-- Original .skell plaintext stays on disk after encryption: never assume it was securely erased.
-- The compiler has an explicit in-memory encrypted compile entry point, with source-neutral error messages. No plaintext temporary source files are created by this entry point.
-- Generated Studio JSON, C++ and VST3 binary output is not encrypted and must be handled as potentially sensitive.
-- Python bytes may remain in process memory, swap, crash dumps or diagnostics; it cannot be reliably zeroized by this implementation.
-- Input source symlinks are refused; output files are exclusive-create. On POSIX output mode is 0600; Windows ACLs inherit from parent.
-- The local Windows key backend requires a logged-in authorized user. This does not protect against malware already running as that user.
+Authorized encrypted compilation decrypts in memory and suppresses error diagnostics that might echo private source tokens. Normal skell 1 compiler stays compatible and refuses .skellenc. On success the authorized caller receives the unencrypted Studio document, which must not be copied into logs or public build artifacts. Encryption does not protect generated VST3 binaries.
+
+Python immutable key and plaintext bytes cannot be reliably zeroized; memory inspection, swap, backups and machine compromise remain risks. A third-party security review and user-device restore test remain required before production use.
 
 ## Testing
 
-Cross-platform compiler and crypto suite, wrong key and tamper tests, in-memory compiler parity, key rotation, filename secret-artifact scan, and ephemeral Windows Credential Manager CI smoke. No production key is needed. Neither CI nor passing crypto tests are a comprehensive third-party security audit.
+Cross-platform regression suite: encryption/decryption, tamper resistance, wrong keys, metadata authentication, UTF-8 bounds, key rotation, redacted diagnostics, scrypt recovery backup and corruption, overwrite refusal, Windows vault mock, and ephemeral real-Windows vault loss/restore CI. All keys and passphrases in tests are synthetic, never production.
