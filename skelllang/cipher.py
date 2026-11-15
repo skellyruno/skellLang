@@ -137,6 +137,7 @@ def decrypt_source(blob: bytes, key_resolver: Callable[[str], bytes]) -> bytes:
             bytes.fromhex(header["nonce"]), ciphertext, aad)
         if len(raw) > MAX_SOURCE:
             raise CipherError(BAD_ENVELOPE)
+        raw.decode("utf-8-sig", errors="strict")
         return raw
     except Exception:
         raise CipherError(BAD_ENVELOPE) from None
@@ -169,13 +170,28 @@ def compile_encrypted(blob: bytes, key_resolver: Callable[[str], bytes]) -> dict
         raise CipherError("Authenticated source failed validation; diagnostics withheld") from None
 
 
+def compile_encrypted_native(blob: bytes, key_resolver: Callable[[str], bytes]) -> str:
+    """Return native C++ only to the authorized caller; never write plaintext."""
+    raw = decrypt_source(blob, key_resolver)
+    from .native_controls import compile_controls
+    try:
+        return compile_controls(raw.decode("utf-8-sig"))
+    except Exception:
+        raise CipherError("Authenticated native source failed validation; diagnostics withheld") from None
+
+
+def compile_encrypted_native_file(path: Path, key_resolver: Callable[[str], bytes]) -> str:
+    return compile_encrypted_native(_read(path, ".skellenc", MAX_ENVELOPE), key_resolver)
+
+
 def _read(path: Path, suffix: str, limit: int) -> bytes:
     path = Path(path).expanduser()
     if path.suffix.lower() != suffix or path.is_symlink() or not path.is_file():
         raise CipherError("Invalid source path or file type")
     if path.stat().st_size > limit:
         raise CipherError("Input exceeds permitted file size")
-    raw = path.read_bytes()
+    with path.open("rb") as stream:
+        raw = stream.read(limit + 1)
     if len(raw) > limit:
         raise CipherError("Input exceeds permitted file size")
     return raw
@@ -205,8 +221,15 @@ def encrypt_file(source_path: Path, destination: Path, key_id: str,
     """Validate v0.1 plaintext before encrypting; retain input unchanged."""
     raw = _read(source_path, ".skell", MAX_SOURCE)
     from .v0_1 import compile_source
+    from .native_controls import parse_controls
     try:
-        compile_source(raw.decode("utf-8-sig"))
+        source = raw.decode("utf-8-sig")
+        first = next((line.strip() for line in source.splitlines()
+                      if line.strip() and not line.lstrip().startswith("#")), "")
+        if first.split()[:1] == ["skell-native"]:
+            parse_controls(source)
+        else:
+            compile_source(source)
     except Exception:
         raise CipherError("Source validation failed; diagnostics withheld") from None
     return _write_new(destination, encrypt_source(raw, key_id, master_key))

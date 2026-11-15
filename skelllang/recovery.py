@@ -32,7 +32,10 @@ def _passphrase(secret: str) -> bytes:
         raise CipherError("A high-entropy recovery passphrase of 20-1024 characters is required")
     if any(ord(ch) < 32 for ch in secret):
         raise CipherError("Recovery passphrase contains unsupported characters")
-    return secret.encode("utf-8")
+    try:
+        return secret.encode("utf-8")
+    except UnicodeError:
+        raise CipherError("Recovery passphrase must be valid UTF-8") from None
 
 
 def _derive(secret: str, salt: bytes) -> bytes:
@@ -88,6 +91,8 @@ def restore_backup(blob: bytes, recovery_passphrase: str) -> tuple[str, bytes]:
         if not (isinstance(nonce, str) and len(nonce) == 2 * NONCE_BYTES
                 and re.fullmatch("[0-9a-f]+", nonce)):
             raise ValueError("nonce")
+        if len(blob) != fixed + size + 32 + 16:
+            raise ValueError("ciphertext length")
         recovered = AESGCM(_derive(recovery_passphrase, bytes.fromhex(salt))).decrypt(
             bytes.fromhex(nonce), blob[fixed + size:], blob[:fixed + size])
         return header["kid"], _key(recovered)
@@ -101,7 +106,8 @@ def _read_backup(path: Path) -> bytes:
         raise CipherError("Invalid recovery backup path")
     if path.stat().st_size > MAX_BACKUP:
         raise CipherError(ERROR)
-    raw = path.read_bytes()
+    with path.open("rb") as stream:
+        raw = stream.read(MAX_BACKUP + 1)
     if len(raw) > MAX_BACKUP:
         raise CipherError(ERROR)
     return raw

@@ -29,3 +29,13 @@ Python immutable key and plaintext bytes cannot be reliably zeroized; memory ins
 ## Testing
 
 Cross-platform regression suite: encryption/decryption, tamper resistance, wrong keys, metadata authentication, UTF-8 bounds, key rotation, redacted diagnostics, scrypt recovery backup and corruption, overwrite refusal, Windows vault mock, and ephemeral real-Windows vault loss/restore CI. All keys and passphrases in tests are synthetic, never production.
+
+## Native source integration (2026-11-15)
+
+The explicit native entrypoints authenticate encrypted `skell-native 1/2`,
+compile controls in memory and redact parser diagnostics. Existing Studio
+entrypoints retain their dictionary return type and reject native source.
+`cipher-check --native` validates without outputting source or generated C++.
+Encrypted file reads are bounded even if a file grows after stat. Recovery
+rejects incorrect ciphertext lengths before running scrypt. No keys, passwords
+or decrypted build artifacts are written by these native checks.

@@ -70,3 +70,49 @@ class CompilerIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NativeCipherIntegrationTests(unittest.TestCase):
+    source = b'skell-native 2\nparameter wet 2102 "Wet Mix" 0 100 100 1 0 "%" automate\n'
+
+    def test_native_encrypt_compile_rotate_without_plaintext_staging(self):
+        from skelllang.cipher import compile_encrypted_native_file
+        from skelllang.native_controls import compile_controls
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / 'native.skell'
+            protected = Path(root) / 'native.skellenc'
+            rotated = Path(root) / 'rotated.skellenc'
+            source.write_bytes(self.source)
+            resolver = lambda key_id: {'old': OLD, 'new': NEW}[key_id]
+            encrypt_file(source, protected, 'old', OLD)
+            self.assertEqual(compile_encrypted_native_file(protected, resolver), compile_controls(self.source.decode()))
+            rotate_file(protected, rotated, resolver, 'new', NEW)
+            self.assertEqual(compile_encrypted_native_file(rotated, resolver), compile_controls(self.source.decode()))
+            self.assertEqual({p.name for p in Path(root).iterdir()}, {'native.skell', 'native.skellenc', 'rotated.skellenc'})
+            with self.assertRaises(CipherError):
+                compile_encrypted_file(protected, resolver)
+
+    def test_native_diagnostics_redacted_and_authorization_required(self):
+        from skelllang.cipher import compile_encrypted_native
+        private = b'skell-native 2\nprivate-invalid-token\n'
+        blob = encrypt_source(private, 'old', OLD)
+        with self.assertRaisesRegex(CipherError, 'withheld') as error:
+            compile_encrypted_native(blob, lambda _: OLD)
+        self.assertNotIn('private-invalid-token', str(error.exception))
+        with self.assertRaises(CipherError):
+            compile_encrypted_native(blob, lambda _: NEW)
+        with self.assertRaises(CipherError):
+            compile_encrypted_native(blob[:-1] + bytes([blob[-1] ^ 1]), lambda _: OLD)
+
+    def test_growing_source_read_is_bounded(self):
+        from skelllang.cipher import _read, MAX_SOURCE
+        from unittest.mock import MagicMock
+        path = MagicMock(spec=Path)
+        # Inspect the real file-read call to ensure stat is not the allocation bound.
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / 'bounded.skell'
+            source.write_bytes(self.source)
+            with patch('pathlib.Path.open', autospec=True) as opened:
+                opened.return_value.__enter__.return_value.read.return_value = self.source
+                _read(source, '.skell', MAX_SOURCE)
+                opened.return_value.__enter__.return_value.read.assert_called_once_with(MAX_SOURCE + 1)

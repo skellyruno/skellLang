@@ -53,3 +53,40 @@ include. Fields are stable key, numeric VST3 ID, title, physical minimum,
 maximum, default and skew. Keep released keys and IDs stable. The plugin
 supplies the DSP and binds those controls. The original `skell 1` Studio
 export continues to use its existing commands.
+
+### Native schema v2 and encrypted native checks
+
+`skell-native 2` appends `STEPS UNITS FLAGS` to each declaration. `STEPS=0`
+means continuous; positive steps use a linear quantized mapping. Flags are
+`automate`, `bypass`, or `readonly`. Bypass must be 0..1 with one step.
+V1 output remains supported. V2 allows 128 controls within 32 KiB.
+
+```text
+skell-native 2
+parameter wet 2102 "Wet Mix" 0 100 100 1 0 "%" automate
+parameter bypass 2104 "Bypass" 0 1 0 1 1 "" bypass
+```
+
+```sh
+python -m skelllang.native_controls controls.skell Controls.inc
+python -m skelllang.native_controls controls.skell controls.json --json
+python -m skelllang.native_controls controls.skell --check --against released.skell
+python -m skelllang cipher-check controls.skellenc --native
+```
+
+Compatibility checks reject changes to existing order, keys, IDs, ranges,
+defaults, skew, steps or flags. Appends and display-label changes are allowed.
+This is a declaration check, not proof of audio/DAW compatibility. V1 has no
+explicit bypass metadata, so migration from a plugin-specific V1 bypass needs
+manual verification, as done for Mini's unchanged host flags and state.
+
+`cipher-encrypt` validates either Studio or native source. Native encrypted
+compilation is explicit (`compile_encrypted_native` or `cipher-check --native`),
+authenticates first, and produces C++ only in memory. Diagnostics are redacted;
+no plaintext temp file or automatic build-cache export is introduced. Generated
+C++ still contains parameter names and values if a caller chooses to save it.
+
+Windows verification on 2026-11-15: 54 tests, 53 passed, one unavailable symlink
+creation test skipped. Real temporary Credential Manager create/delete/restore
+passed; five original Forge compiler parity scenarios passed. Private artifact
+filename scan passed. External security review remains outstanding.

@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     encrypt.add_argument("--key-id", required=True)
     verify = subs.add_parser("cipher-check", help="Authorized in-memory compile")
     verify.add_argument("source", type=Path)
+    verify.add_argument("--native", action="store_true", help="Check authenticated native control source")
     rotate = subs.add_parser("cipher-rotate", help="Rotate encrypted source")
     rotate.add_argument("source", type=Path)
     rotate.add_argument("destination", type=Path)
@@ -73,7 +74,11 @@ def main(argv: list[str] | None = None) -> int:
                              vault.resolve(args.key_id))
                 print("SkellCipher: encrypted file created; source plaintext remains on disk")
             elif args.action == "cipher-check":
-                compile_encrypted_file(args.source, vault.resolve)
+                if args.native:
+                    from .cipher import compile_encrypted_native_file
+                    compile_encrypted_native_file(args.source, vault.resolve)
+                else:
+                    compile_encrypted_file(args.source, vault.resolve)
                 print("SkellCipher: authorized in-memory compilation passed")
             elif args.action == "cipher-backup":
                 from .recovery import backup_to_file
@@ -91,6 +96,9 @@ def main(argv: list[str] | None = None) -> int:
                             args.new_key_id, vault.resolve(args.new_key_id))
                 print("SkellCipher: ciphertext rotated; original file preserved")
         return 0
+    except ImportError:
+        print("SkellLang error: install the optional Windows crypto dependencies with pip install skelllang[windows]", file=sys.stderr)
+        return 1
     except (SkellLangError, OSError, ValueError) as exc:
         print("SkellLang error:", str(exc), file=sys.stderr)
         return 1
