@@ -10,8 +10,10 @@ dist/
 *.key
 *.pem
 *.p12
+*.skellbackup
 private/
 secrets/
+protected/
 .skellcipher/
 .skellcipher-work/
 *.plaintext.tmp

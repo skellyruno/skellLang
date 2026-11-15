@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import argparse
 from decimal import Decimal
+from dataclasses import dataclass, asdict
+import json
+import struct
 from pathlib import Path
 import re
 import shlex
@@ -14,53 +17,152 @@ NUMBER = re.compile(r"-?[0-9]{1,6}(?:\.[0-9]{1,6})?")
 TITLE = re.compile(r"[A-Za-z0-9 %/().-]{1,40}")
 
 
-def compile_controls(source: str) -> str:
-    if len(source.encode("utf-8")) > 8192:
-        raise SkellLangError("native controls source exceeds 8 KiB")
+@dataclass(frozen=True)
+class Control:
+    key: str
+    id: int
+    title: str
+    low: str
+    high: str
+    initial: str
+    skew: str
+    steps: int = 0
+    units: str = ""
+    flags: str = "automate"
+
+
+def parse_controls(source: str) -> tuple[int, tuple[Control, ...]]:
+    if len(source.encode("utf-8")) > 32768:
+        raise SkellLangError("native controls source exceeds 32 KiB")
     try:
-        lines = [parts for line in source.splitlines()
+        lines = [(n, parts) for n, line in enumerate(source.splitlines(), 1)
                  if (parts := shlex.split(line, comments=True))]
     except ValueError as exc:
         raise SkellLangError(str(exc)) from exc
-    if not lines or lines[0] != ["skell-native", "1"] or not 2 <= len(lines) <= 65:
-        raise SkellLangError("expected skell-native 1 followed by 1 to 64 controls")
-    controls = {}
-    ids = set()
-    for line in lines[1:]:
-        if len(line) != 8 or line[0] != "parameter":
-            raise SkellLangError("expected parameter KEY ID TITLE MIN MAX DEFAULT SKEW")
-        _, key, number, title, low, high, initial, skew = line
+    if not lines or lines[0][1] not in (["skell-native", "1"], ["skell-native", "2"]):
+        raise SkellLangError("expected skell-native 1 or skell-native 2")
+    version = int(lines[0][1][1])
+    limit = 64 if version == 1 else 128
+    if not 2 <= len(lines) <= limit + 1:
+        raise SkellLangError(f"expected 1 to {limit} controls")
+    if version == 1 and len(source.encode("utf-8")) > 8192:
+        raise SkellLangError("native controls v1 source exceeds 8 KiB")
+    controls = []
+    ids, keys = set(), set()
+    for line_number, line in lines[1:]:
+        def fail(message: str) -> None:
+            raise SkellLangError(f"line {line_number}: {message}")
+        if len(line) != (8 if version == 1 else 11) or line[0] != "parameter":
+            fail("expected parameter KEY ID TITLE MIN MAX DEFAULT SKEW" +
+                 (" STEPS UNITS FLAGS" if version == 2 else ""))
+        _, key, number, title, *values = line[:8]
         if not KEY.fullmatch(key) or not TITLE.fullmatch(title) or not re.fullmatch(r"[0-9]{1,10}", number):
-            raise SkellLangError("invalid native control key, ID or title")
+            fail("invalid native control key, ID or title")
         tag = int(number)
-        if key in controls or tag in ids or not 1 <= tag < 2**31:
-            raise SkellLangError("duplicate or out-of-range native control ID")
-        if not all(NUMBER.fullmatch(value) for value in (low, high, initial, skew)):
-            raise SkellLangError("invalid native control range")
-        low, high, initial, skew = map(Decimal, (low, high, initial, skew))
+        if key in keys or tag in ids or not 1 <= tag < 2**31:
+            fail("duplicate or out-of-range native control ID")
+        if not all(NUMBER.fullmatch(value) for value in values):
+            fail("invalid native control range")
+        low, high, initial, skew = map(Decimal, values)
         if not low < high or not low <= initial <= high or not Decimal("0.01") <= skew <= 100:
-            raise SkellLangError("invalid native control bounds, default or skew")
-        floats = ", ".join(f"{value:f}" + ("f" if "." in f"{value:f}" else ".0f")
-                           for value in (low, high, initial, skew))
-        controls[key] = f'    {{{tag}u, u"{title}", "{key}", {floats}}},'
+            fail("invalid native control bounds, default or skew")
+        # The emitted ABI uses float32. Reject ranges that collapse in C++.
+        as_float = lambda value: struct.unpack("f", struct.pack("f", float(value)))[0]
+        if as_float(low) >= as_float(high):
+            fail("range collapses at float32 precision")
+        steps, units, flags = 0, "", "automate"
+        if version == 2:
+            count, units, flags = line[8:]
+            if not re.fullmatch(r"[0-9]{1,6}", count) or int(count) > 65535:
+                fail("steps must be 0 to 65535")
+            steps = int(count)
+            if not re.fullmatch(r"[A-Za-z0-9 %/().-]{0,16}", units):
+                fail("invalid units")
+            if flags not in ("automate", "bypass", "readonly"):
+                fail("flags must be automate, bypass or readonly")
+            if steps and (skew != 1 or ((initial-low)*steps/(high-low)) % 1 != 0):
+                fail("discrete controls require linear mapping and an on-grid default")
+            if flags == "bypass" and (low != 0 or high != 1 or steps != 1):
+                fail("bypass requires range 0..1 and one step")
+        controls.append(Control(key, tag, title, *(format(x, "f") for x in (low, high, initial, skew)),
+                                steps, units, flags))
         ids.add(tag)
-    fields = ", ".join(f"control_{key}" for key in controls)
-    return ("// Generated by SkellLang native controls v1.\n"
+        keys.add(key)
+    if sum(c.flags == "bypass" for c in controls) > 1:
+        raise SkellLangError("only one host bypass control is allowed")
+    return version, tuple(controls)
+
+
+def compile_controls(source: str) -> str:
+    version, controls = parse_controls(source)
+    rows = []
+    for c in controls:
+        floats = ", ".join(v + ("f" if "." in v else ".0f") for v in (c.low, c.high, c.initial, c.skew))
+        extra = "" if version == 1 else f', {c.steps}, u"{c.units}", NativeControlFlags::{c.flags}'
+        rows.append(f'    {{{c.id}u, u"{c.title}", "{c.key}", {floats}{extra}}},')
+    fields = ", ".join(f"control_{c.key}" for c in controls)
+    return (f"// Generated by SkellLang native controls v{version}.\n"
             f"enum ControlIndex {{ {fields}, controlCount }};\n"
             "inline constexpr NativeControl controls[]{\n"
-            + "\n".join(controls.values()) + "\n};\n")
+            + "\n".join(rows) + "\n};\n")
+
+
+def manifest(source: str) -> dict:
+    version, controls = parse_controls(source)
+    return {"schema": "skell-native-controls", "version": version,
+            "controls": [asdict(c) for c in controls]}
+
+
+def compatibility_errors(previous: str, current: str) -> list[str]:
+    """Allow appended controls and label edits; protect existing host/state contracts."""
+    _, old = parse_controls(previous)
+    _, new = parse_controls(current)
+    errors = []
+    for index, before in enumerate(old):
+        if index >= len(new) or new[index].key != before.key:
+            errors.append(f"{before.key}: removed or reordered")
+            continue
+        after = new[index]
+        for field in ("id", "low", "high", "initial", "skew", "steps", "flags"):
+            a, b = getattr(before, field), getattr(after, field)
+            if field in ("low", "high", "initial", "skew"):
+                a, b = Decimal(a), Decimal(b)
+            if a != b:
+                errors.append(f"{before.key}: changed {field}")
+    return errors
+
+
+def read_source(path: Path) -> str:
+    if path.suffix.lower() == ".skellenc":
+        raise SkellLangError("encrypted sources require authorized SkellCipher support")
+    with path.open("rb") as stream:
+        data = stream.read(32769)
+    if len(data) > 32768:
+        raise SkellLangError("native controls source exceeds 32 KiB")
+    return data.decode("utf-8")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
-    parser.add_argument("output", type=Path)
+    parser.add_argument("output", type=Path, nargs="?")
+    parser.add_argument("--json", action="store_true", help="Emit a tooling manifest instead of C++")
+    parser.add_argument("--check", action="store_true", help="Validate without writing")
+    parser.add_argument("--against", type=Path, help="Check compatibility with released source")
     args = parser.parse_args()
     try:
-        with args.source.open("rb") as stream:
-            source = stream.read(8193).decode("utf-8")
-        result = compile_controls(source)
-        args.output.write_text(result, encoding="utf-8", newline="\n")
+        source = read_source(args.source)
+        if args.against:
+            errors = compatibility_errors(read_source(args.against), source)
+            if errors:
+                raise SkellLangError("; ".join(errors))
+        result = json.dumps(manifest(source), indent=2) + "\n" if args.json else compile_controls(source)
+        if not args.check:
+            if args.output is None:
+                raise SkellLangError("output is required unless --check is used")
+            if args.output.resolve() in {args.source.resolve(), args.against.resolve() if args.against else None}:
+                raise SkellLangError("output must not overwrite an input source")
+            args.output.write_text(result, encoding="utf-8", newline="\n")
     except (UnicodeError, OSError, SkellLangError) as exc:
         parser.exit(1, f"SkellLang native controls: {exc}\n")
 
