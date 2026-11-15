@@ -4,10 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skelllang"
-version = "0.1.0"
-description = "Experimental Skelly declarative audio-plugin language"
+version = "0.1.1"
+description = "Experimental Skelly compiler with opt-in SkellCipher"
 requires-python = ">=3.10"
 authors = [{name = "Skelly"}]
+
+[project.optional-dependencies]
+cipher = ["cryptography>=46,<48"]
+windows = ["cryptography>=46,<48", "keyring>=25,<27",
+           "pywin32>=311; sys_platform == 'win32'"]
 
 [project.scripts]
 skelllang = "skelllang.__main__:main"
