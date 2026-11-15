@@ -68,8 +68,11 @@ class WindowsCredentialVault:
 
     def import_key(self, key_id: str, master_key: bytes) -> None:
         """Restore an authenticated offline backup to a previously unused ID."""
-        _key_id(key_id)
-        _key(master_key)
+        try:
+            _key_id(key_id)
+            _key(master_key)
+        except CipherError:
+            raise KeyStoreError("Invalid restored key") from None
         try:
             if self._backend.get_password(SERVICE, key_id) is not None:
                 raise KeyStoreError("Key identifier already exists")
