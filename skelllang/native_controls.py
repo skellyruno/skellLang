@@ -51,16 +51,34 @@ def compile_controls(source: str) -> str:
             + "\n".join(controls.values()) + "\n};\n")
 
 
+def export_controls(source_path: Path, destination: Path) -> Path:
+    """Compile and create a native-control table without replacing any path."""
+    try:
+        with Path(source_path).expanduser().open("rb") as stream:
+            source = stream.read(8193).decode("utf-8")
+    except UnicodeError as exc:
+        raise SkellLangError("Native controls source must be UTF-8") from exc
+
+    result = compile_controls(source)
+    output = Path(destination).expanduser()
+    if not output.parent.is_dir():
+        raise SkellLangError("Destination parent folder does not exist")
+
+    # Exclusive creation also refuses existing symlinks and source==destination.
+    try:
+        with output.open("x", encoding="utf-8", newline="") as handle:
+            handle.write(result)
+    except FileExistsError as exc:
+        raise SkellLangError(f"Refusing to overwrite existing file: {output}") from exc
+    return output
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
     try:
-        with args.source.open("rb") as stream:
-            source = stream.read(8193).decode("utf-8")
-        result = compile_controls(source)
-        args.output.write_text(result, encoding="utf-8", newline="\n")
+        export_controls(args.source, args.output)
     except (UnicodeError, OSError, SkellLangError) as exc:
         parser.exit(1, f"SkellLang native controls: {exc}\n")
 
