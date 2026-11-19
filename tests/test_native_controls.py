@@ -1,6 +1,9 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 from skelllang import SkellLangError
-from skelllang.native_controls import compile_controls
+from skelllang.native_controls import compile_controls, export_controls
 
 
 class NativeControlTests(unittest.TestCase):
@@ -19,3 +22,36 @@ class NativeControlTests(unittest.TestCase):
                     valid.replace("Speed", "Speed^"), " " * 8193):
             with self.subTest(line=bad[:80]), self.assertRaises(SkellLangError):
                 compile_controls(prefix + bad)
+
+
+class NativeControlExportTests(unittest.TestCase):
+    SOURCE = "skell-native 1\nparameter speed 2100 \"Speed (ms)\" 0 200 25 0.4\n"
+
+    def test_export_creates_new_file_and_preserves_source(self):
+        with TemporaryDirectory() as folder:
+            source = Path(folder) / "controls.skell"
+            output = Path(folder) / "Controls.inc"
+            source.write_text(self.SOURCE, encoding="utf-8")
+            original = source.read_bytes()
+            self.assertEqual(export_controls(source, output), output)
+            self.assertEqual(output.read_text(encoding="utf-8"), compile_controls(self.SOURCE))
+            self.assertEqual(source.read_bytes(), original)
+
+    def test_export_refuses_to_overwrite_existing_destination(self):
+        with TemporaryDirectory() as folder:
+            source = Path(folder) / "controls.skell"
+            output = Path(folder) / "Controls.inc"
+            source.write_text(self.SOURCE, encoding="utf-8")
+            output.write_text("preserve this file\n", encoding="utf-8")
+            with self.assertRaises(SkellLangError):
+                export_controls(source, output)
+            self.assertEqual(output.read_text(encoding="utf-8"), "preserve this file\n")
+
+    def test_export_refuses_source_as_destination(self):
+        with TemporaryDirectory() as folder:
+            source = Path(folder) / "controls.skell"
+            source.write_text(self.SOURCE, encoding="utf-8")
+            original = source.read_bytes()
+            with self.assertRaises(SkellLangError):
+                export_controls(source, source)
+            self.assertEqual(source.read_bytes(), original)
