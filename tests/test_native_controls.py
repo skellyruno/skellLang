@@ -1,7 +1,8 @@
 import unittest
-from skelllang import SkellLangError
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+from skelllang import SkellLangError
 from skelllang.native_controls import compile_controls, export_controls
 
 

@@ -28,9 +28,9 @@ skell-native 1
 parameter speed 2100 "Retune Speed (ms)" 0 200 25 0.4
 ```
 
-Run `python -m skelllang.native_controls INPUT OUTPUT
-
-The native export command creates a new file and refuses to overwrite an existing destination.` to generate a C++
+Run `python -m skelllang.native_controls INPUT OUTPUT` to generate a C++
+include. The command creates a new file and refuses to overwrite an existing
+destination.
 include. Fields are stable key, numeric VST3 ID, title, physical minimum,
 maximum, default and skew. Keep released keys and IDs stable. The plugin
 supplies the DSP and binds those controls. The original `skell 1` Studio

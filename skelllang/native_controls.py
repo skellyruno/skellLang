@@ -72,6 +72,7 @@ def export_controls(source_path: Path, destination: Path) -> Path:
         raise SkellLangError(f"Refusing to overwrite existing file: {output}") from exc
     return output
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
